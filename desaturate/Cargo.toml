@@ -1,0 +1,28 @@
+[package]
+name = "desaturate"
+version = "0.0.0"
+edition = "2021"
+categories = ["asynchronous", "no-std::no-alloc", "rust-patterns"]
+keywords = ["experimental"]
+description = "This package aims to makes it easier to maintain a single code base for both regular and async functions."
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# Placeholder for now
+include = ["Cargo.toml", "src/lib.rs"]
+
+[features]
+default = ["macros"]
+macros = ["dep:desaturate-macros"]
+generate-async = ["desaturate-macros?/generate-async"]
+generate-non-async = ["desaturate-macros?/generate-non-async"]
+
+[dependencies]
+desaturate-macros = { version = "0.0.0", path = "../desaturate-macros", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+
+[lints.rust]
+unsafe_code = "forbid"

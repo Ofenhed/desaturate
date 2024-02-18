@@ -1,0 +1,9 @@
+[workspace]
+members = ["desaturate", "desaturate-macros"]
+resolver = "2"
+
+[workspace.package]
+license = "MIT OR Apache-2.0"
+authors = ["Marcus Ofenhed"]
+repository = "https://github.com/Ofenhed/desaturate"
+keywords = ["experimental"]
