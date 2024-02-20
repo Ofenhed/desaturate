@@ -70,68 +70,86 @@ where
     ) -> impl Desaturated<Output>;
 }
 
-pub trait IntoDesaturated<Output>: IntoFuture<Output = Output> {
-    fn desaturate(self, fun: impl FnOnce() -> Output) -> impl Desaturated<Output>;
-}
-
-impl<Output, Fut: Future<Output = Output>> IntoDesaturated<Output> for Fut {
+impl<O, A, F: Future<Output = O>, AF: FnOnce(A) -> F> IntoDesaturatedWith<A, O, F> for AF {
     features! {async fn:
-        fn desaturate(self, fun: impl FnOnce() -> Output) -> impl Desaturated<Output> {
-            struct Holder<O, F: FnOnce() -> O, I: Future<Output = O>> {
-                fun: F,
-                fut: I,
+        #[inline(always)]
+        fn desaturate_with(self, args: A, fun: impl FnOnce(A) -> O) -> impl Desaturated<O> {
+            struct Holder<Output, Args, NormalFunc: FnOnce(Args) -> Output, Fut: Future<Output = Output>, AsyncFunc: FnOnce(Args) -> Fut> {
+                args: Args,
+                fun: NormalFunc,
+                fut: AsyncFunc,
             }
-            impl<O, F: FnOnce() -> O, I: Future<Output = O>> IntoFuture for Holder<O, F, I> {
-                type Output = O;
+            impl<Output, Args, NormalFunc: FnOnce(Args) -> Output, Fut: Future<Output = Output>, AsyncFunc: FnOnce(Args) -> Fut> IntoFuture for Holder<Output, Args, NormalFunc, Fut, AsyncFunc> {
+                type Output = Output;
 
-                type IntoFuture = I;
+                type IntoFuture = Fut;
 
+                #[inline(always)]
                 fn into_future(self) -> Self::IntoFuture {
-                    self.fut
+                    (self.fut)(self.args)
                 }
             }
-            impl<O, F: FnOnce() -> O, I: Future<Output = O>> Syncable<O> for Holder<O, F, I> {
-                fn call(self) -> O {
-                    (self.fun)()
+            impl<Output, Args, NormalFunc: FnOnce(Args) -> Output, Fut: Future<Output = Output>, AsyncFunc: FnOnce(Args) -> Fut> Syncable<Output> for Holder<Output, Args, NormalFunc, Fut, AsyncFunc> {
+                #[inline(always)]
+                fn call(self) -> Output {
+                    (self.fun)(self.args)
                 }
             }
             Holder {
+                args,
                 fun,
                 fut: self
             }
         }
     }
     features! {async !fn:
-        fn desaturate(self, _: impl FnOnce() -> Output) -> impl Desaturated<Output> {
-            self
+        #[inline(always)]
+        fn desaturate_with(self, args: A, _: impl FnOnce(A) -> O) -> impl Desaturated<O> {
+            self(args)
         }
     }
     features! {!async fn:
-        fn desaturate(self, fun: impl FnOnce() -> Output) -> impl Desaturated<Output> {
-            struct Holder<O, F: FnOnce() -> O> {
-                fun: F,
+        #[inline(always)]
+        fn desaturate_with(self, args: A, fun: impl FnOnce(A) -> O) -> impl Desaturated<O> {
+            struct Holder<Output, Args, Function: FnOnce(Args) -> Output> {
+                args: Args,
+                fun: Function,
             }
-            impl<O, F: FnOnce() -> O> Syncable<O> for Holder<O, F> {
-                fn call(self) -> O {
-                    (self.fun)()
+            impl<Output, Args, Function: FnOnce(Args) -> Output> Syncable<Output> for Holder<Output, Args, Function> {
+                #[inline(always)]
+                fn call(self) -> Output {
+                    (self.fun)(self.args)
                 }
             }
             Holder {
-                fun
+                args,
+                fun,
             }
         }
     }
     features! {!async !fn:
-        fn desaturate(self, _: impl FnOnce() -> Output) -> impl Desaturated<Output> {
+        #[inline(always)]
+        fn desaturate_with(self, _: A, _: impl FnOnce(A) -> O) -> impl Desaturated<O> {
             ()
         }
+    }
+}
+
+pub trait IntoDesaturated<Output>: IntoFuture<Output = Output> {
+    fn desaturate(self, fun: impl FnOnce() -> Output) -> impl Desaturated<Output>;
+}
+
+impl<Output, F: Future<Output = Output>> IntoDesaturated<Output> for F {
+    #[inline(always)]
+    fn desaturate(self, fun: impl FnOnce() -> Output) -> impl Desaturated<Output> {
+        (|()| self).desaturate_with((), |()| fun())
     }
 }
 
 #[cfg(test)]
 mod tests {
     #[allow(unused_imports)]
-    use super::{Desaturated, IntoDesaturated, Syncable};
+    use super::{Desaturated, IntoDesaturated, IntoDesaturatedWith, Syncable};
     #[allow(unused_imports)]
     use core::sync::atomic::{AtomicBool, Ordering};
     #[test]
@@ -181,6 +199,15 @@ mod tests {
         let sync_stuff = || *with * 2;
         async_stuff.desaturate(sync_stuff)
     }
+    //fn do_stuff_with(with: &i32) -> impl Desaturated<i32> + '_ {
+    //    let async_stuff = |var: &i32| async move {
+    //        *var * 2
+    //    };
+    //    let sync_stuff = |var: &i32| {
+    //        *var * 2
+    //    };
+    //    async_stuff.desaturate_with(with, sync_stuff)
+    //}
     #[test]
     #[cfg_attr(not(feature = "generate-normal"), ignore)]
     fn can_take_pointer() {
@@ -194,8 +221,7 @@ mod tests {
         assert_eq!(20, do_stuff(&10).await)
     }
     #[test]
-    #[cfg_attr(feature = "generate-async", ignore)]
-    #[cfg_attr(feature = "generate-normal", ignore)]
+    #[cfg_attr(any(feature = "generate-async", feature = "generate-normal"), ignore)]
     fn it_always_builds() {
         _ = do_stuff(&10)
     }
