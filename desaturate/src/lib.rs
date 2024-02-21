@@ -3,7 +3,7 @@ use core::future::{Future, IntoFuture};
 pub use desaturate_macros::*;
 
 #[must_use]
-pub trait Syncable<Output: Sized> {
+pub trait Blocking<Output: Sized> {
     fn call(self) -> Output;
 }
 
@@ -24,56 +24,65 @@ macro_rules! features {
         features!{ $($rest)+ }
     };
     (fn $($rest:tt)+) => {
-        #[cfg(feature = "generate-normal")]
+        #[cfg(feature = "generate-blocking")]
         features!{ $($rest)+ }
     };
     (!fn $($rest:tt)+) => {
-        #[cfg(not(feature = "generate-normal"))]
+        #[cfg(not(feature = "generate-blocking"))]
         features!{ $($rest)+ }
     };
 }
 
 macro_rules! create_asyncable {
     ($T:ident => $($($traits:tt)+)?) => {
-        /// This function can be used either asynchronously (with `await`) or synchronously with [`Syncable::call`].
+        /// This function can be used either asynchronously (with `await`) or synchronously with [`Blocking::call`].
         #[must_use]
-        pub trait Desaturated<$T>: $($($traits)+ +)? internal::OnlyAutomatic<$T> {}
+        pub trait Desaturated<'a, $T>: $($($traits)+ +)? 'a + internal::OnlyAutomatic<$T> {}
         $(
-            impl<$T, U: $($traits)+> Desaturated<$T> for U {}
+            impl<'a, $T, U: $($traits)+ + 'a> Desaturated<'a, $T> for U {}
             impl<$T, U: $($traits)+> internal::OnlyAutomatic<$T> for U {}
         )?
     };
 }
 
-features! {async fn: create_asyncable!{ T => Syncable<T> + IntoFuture<Output = T> }}
+features! {async fn: create_asyncable!{ T => Blocking<T> + IntoFuture<Output = T> }}
 
-features! {!async fn: create_asyncable!{ T => Syncable<T> }}
+features! {!async fn: create_asyncable!{ T => Blocking<T> }}
 
 features! {async !fn: create_asyncable!{ T => IntoFuture<Output = T> }}
 
 features! {!async !fn: create_asyncable!{ T => }}
 
 features! {!async !fn:
-    impl<O> Desaturated<O> for () {}
+    impl<'a, O> Desaturated<'a, O> for () {}
     impl<O> internal::OnlyAutomatic<O> for () {}
 }
 
-pub trait IntoDesaturatedWith<Args, Output, Fut>
+pub trait IntoDesaturatedWith<'fut, 'args: 'fut, Args, Output, Fut>
 where
-    Fut: Future<Output = Output>,
-    Self: FnOnce(Args) -> Fut,
+    Args: 'args,
+    Fut: 'fut + Future<Output = Output>,
+    Self: 'fut + FnOnce(Args) -> Fut,
 {
     fn desaturate_with(
         self,
         args: Args,
-        fun: impl FnOnce(Args) -> Output,
-    ) -> impl Desaturated<Output>;
+        fun: impl FnOnce(Args) -> Output + 'fut,
+    ) -> impl Desaturated<'fut, Output>;
 }
 
-impl<O, A, F: Future<Output = O>, AF: FnOnce(A) -> F> IntoDesaturatedWith<A, O, F> for AF {
+impl<
+        'fut,
+        'args: 'fut,
+        O: 'fut,
+        A: 'args,
+        F: Future<Output = O> + 'fut,
+        AF: 'fut + FnOnce(A) -> F,
+    > IntoDesaturatedWith<'fut, 'args, A, O, F> for AF
+{
     features! {async fn:
         #[inline(always)]
-        fn desaturate_with(self, args: A, fun: impl FnOnce(A) -> O) -> impl Desaturated<O> {
+        fn desaturate_with(self, args: A, fun: impl 'fut + FnOnce(A) -> O) -> impl Desaturated<'fut, O> {
             struct Holder<Output, Args, NormalFunc: FnOnce(Args) -> Output, Fut: Future<Output = Output>, AsyncFunc: FnOnce(Args) -> Fut> {
                 args: Args,
                 fun: NormalFunc,
@@ -89,7 +98,7 @@ impl<O, A, F: Future<Output = O>, AF: FnOnce(A) -> F> IntoDesaturatedWith<A, O, 
                     (self.fut)(self.args)
                 }
             }
-            impl<Output, Args, NormalFunc: FnOnce(Args) -> Output, Fut: Future<Output = Output>, AsyncFunc: FnOnce(Args) -> Fut> Syncable<Output> for Holder<Output, Args, NormalFunc, Fut, AsyncFunc> {
+            impl<Output, Args, NormalFunc: FnOnce(Args) -> Output, Fut: Future<Output = Output>, AsyncFunc: FnOnce(Args) -> Fut> Blocking<Output> for Holder<Output, Args, NormalFunc, Fut, AsyncFunc> {
                 #[inline(always)]
                 fn call(self) -> Output {
                     (self.fun)(self.args)
@@ -104,18 +113,18 @@ impl<O, A, F: Future<Output = O>, AF: FnOnce(A) -> F> IntoDesaturatedWith<A, O, 
     }
     features! {async !fn:
         #[inline(always)]
-        fn desaturate_with(self, args: A, _: impl FnOnce(A) -> O) -> impl Desaturated<O> {
+        fn desaturate_with(self, args: A, _: impl FnOnce(A) -> O) -> impl Desaturated<'fut, O> {
             self(args)
         }
     }
     features! {!async fn:
         #[inline(always)]
-        fn desaturate_with(self, args: A, fun: impl FnOnce(A) -> O) -> impl Desaturated<O> {
-            struct Holder<Output, Args, Function: FnOnce(Args) -> Output> {
+        fn desaturate_with(self, args: A, fun: impl FnOnce(A) -> O) -> impl Desaturated<'fut, O> {
+            struct Holder<'args, 'fut, Output, Args: 'args, Function: 'fut + FnOnce(Args) -> Output> {
                 args: Args,
                 fun: Function,
             }
-            impl<Output, Args, Function: FnOnce(Args) -> Output> Syncable<Output> for Holder<Output, Args, Function> {
+            impl<'args, 'fut, Output, Args: 'args, Function: 'fut + FnOnce(Args) -> Output> Blocking<Output> for Holder<'args, 'fut, Output, Args, Function> {
                 #[inline(always)]
                 fn call(self) -> Output {
                     (self.fun)(self.args)
@@ -129,19 +138,19 @@ impl<O, A, F: Future<Output = O>, AF: FnOnce(A) -> F> IntoDesaturatedWith<A, O, 
     }
     features! {!async !fn:
         #[inline(always)]
-        fn desaturate_with(self, _: A, _: impl FnOnce(A) -> O) -> impl Desaturated<O> {
+        fn desaturate_with(self, _: A, _: impl FnOnce(A) -> O) -> impl Desaturated<'fut, O> {
             ()
         }
     }
 }
 
-pub trait IntoDesaturated<Output>: IntoFuture<Output = Output> {
-    fn desaturate(self, fun: impl FnOnce() -> Output) -> impl Desaturated<Output>;
+pub trait IntoDesaturated<'a, Output>: IntoFuture<Output = Output> + 'a {
+    fn desaturate(self, fun: impl FnOnce() -> Output + 'a) -> impl Desaturated<'a, Output>;
 }
 
-impl<Output, F: Future<Output = Output>> IntoDesaturated<Output> for F {
+impl<'a, Output: 'a, F: Future<Output = Output> + 'a> IntoDesaturated<'a, Output> for F {
     #[inline(always)]
-    fn desaturate(self, fun: impl FnOnce() -> Output) -> impl Desaturated<Output> {
+    fn desaturate(self, fun: impl FnOnce() -> Output + 'a) -> impl Desaturated<'a, Output> {
         (|()| self).desaturate_with((), |()| fun())
     }
 }
@@ -149,13 +158,13 @@ impl<Output, F: Future<Output = Output>> IntoDesaturated<Output> for F {
 #[cfg(test)]
 mod tests {
     #[allow(unused_imports)]
-    use super::{Desaturated, IntoDesaturated, IntoDesaturatedWith, Syncable};
+    use super::{Blocking, Desaturated, IntoDesaturated, IntoDesaturatedWith};
     #[allow(unused_imports)]
     use core::sync::atomic::{AtomicBool, Ordering};
     #[test]
-    #[cfg_attr(not(feature = "generate-normal"), ignore)]
+    #[cfg_attr(not(feature = "generate-blocking"), ignore)]
     fn normal_returns_right() {
-        #[cfg(feature = "generate-normal")]
+        #[cfg(feature = "generate-blocking")]
         {
             let async_executed = AtomicBool::new(false);
             let normal_executed = AtomicBool::new(false);
@@ -199,7 +208,8 @@ mod tests {
         let sync_stuff = || *with * 2;
         async_stuff.desaturate(sync_stuff)
     }
-    //fn do_stuff_with(with: &i32) -> impl Desaturated<i32> + '_ {
+    // TODO: Figure out how to get this to work
+    //fn do_stuff_with(with: &i32) -> impl Desaturated<'_, i32> + '_ {
     //    let async_stuff = |var: &i32| async move {
     //        *var * 2
     //    };
@@ -209,9 +219,9 @@ mod tests {
     //    async_stuff.desaturate_with(with, sync_stuff)
     //}
     #[test]
-    #[cfg_attr(not(feature = "generate-normal"), ignore)]
+    #[cfg_attr(not(feature = "generate-blocking"), ignore)]
     fn can_take_pointer() {
-        #[cfg(feature = "generate-normal")]
+        #[cfg(feature = "generate-blocking")]
         assert_eq!(20, do_stuff(&10).call())
     }
     #[tokio::test]
@@ -221,7 +231,7 @@ mod tests {
         assert_eq!(20, do_stuff(&10).await)
     }
     #[test]
-    #[cfg_attr(any(feature = "generate-async", feature = "generate-normal"), ignore)]
+    #[cfg_attr(any(feature = "generate-async", feature = "generate-blocking"), ignore)]
     fn it_always_builds() {
         _ = do_stuff(&10)
     }
