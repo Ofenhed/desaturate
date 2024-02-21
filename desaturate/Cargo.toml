@@ -16,7 +16,7 @@ include = ["Cargo.toml", "src/lib.rs"]
 default = ["macros"]
 macros = ["dep:desaturate-macros"]
 generate-async = ["desaturate-macros?/generate-async"]
-generate-normal = ["desaturate-macros?/generate-non-async"]
+generate-blocking = ["desaturate-macros?/generate-blocking"]
 
 [dependencies]
 desaturate-macros = { version = "0.0.0", path = "../desaturate-macros", optional = true }
