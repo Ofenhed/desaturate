@@ -802,6 +802,7 @@ impl Asyncable {
             (false, false) => Err(syn::Error::new(self.attrs.span(), "desaturate-macros requires one of 'generate-async' or 'generate-non-async' features to be active"))?,
             (true, false) => Ok(item),
             (make_async, make_sync) => {
+                #[cfg(feature = "debug")]
                 eprintln!("Generating async({make_async}) and blocking({make_sync})");
                 let function: AsyncFunction = parse2(item)?;
                 let state: FunctionState = (&function).into();
@@ -810,6 +811,7 @@ impl Asyncable {
                     make_async,
                     make_blocking: make_sync,
                 }.into_token_stream();
+                #[cfg(feature = "debug")]
                 eprintln!("Rendered code {result}");
                 Ok(result)
             },
