@@ -219,10 +219,11 @@ mod tests {
         let sync_stuff = |var: &'a i32| *var * 2;
         async_stuff.desaturate_with(with, sync_stuff)
     }
-    // TODO: Figure out how to get this to work
-    //fn do_stuff_with_pointer_again<'a>(with: &'a i32) -> impl Desaturated<i32> + '_ {
-    //    |var: &i32| async move { *var * 2}.desaturate_with(with, |var: &i32| *var * 2)
-    //}
+    fn do_stuff_with_pointer_in_inner_function<'a>(with: &'a i32) -> impl Desaturated<i32> + '_ {
+        async fn async_stuff(var: &i32) -> i32 { *var * 2 }
+        fn sync_stuff(var: &i32) -> i32 { *var * 2 }
+        async_stuff.desaturate_with(with, sync_stuff)
+    }
     #[test]
     #[cfg_attr(not(feature = "generate-blocking"), ignore)]
     fn can_take_pointer() {
