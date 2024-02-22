@@ -220,21 +220,35 @@ mod tests {
         async_stuff.desaturate_with(with, sync_stuff)
     }
     fn do_stuff_with_pointer_in_inner_function<'a>(with: &'a i32) -> impl Desaturated<i32> + '_ {
-        async fn async_stuff(var: &i32) -> i32 { *var * 2 }
-        fn sync_stuff(var: &i32) -> i32 { *var * 2 }
+        async fn async_stuff(var: &i32) -> i32 {
+            *var * 2
+        }
+        fn sync_stuff(var: &i32) -> i32 {
+            *var * 2
+        }
         async_stuff.desaturate_with(with, sync_stuff)
     }
     #[test]
     #[cfg_attr(not(feature = "generate-blocking"), ignore)]
     fn can_take_pointer() {
         #[cfg(feature = "generate-blocking")]
-        assert_eq!(20, do_stuff(&10).call())
+        {
+            assert_eq!(20, do_stuff(&10).call());
+            let arg = 30;
+            assert_eq!(60, do_stuff_with_pointer(&arg).call());
+            assert_eq!(60, do_stuff_with_pointer_in_inner_function(&arg).call());
+        }
     }
     #[tokio::test]
     #[cfg_attr(not(feature = "generate-async"), ignore)]
     async fn async_can_take_pointer() {
         #[cfg(feature = "generate-async")]
-        assert_eq!(20, do_stuff(&10).await)
+        {
+            assert_eq!(20, do_stuff(&10).await);
+            let arg = 30;
+            assert_eq!(60, do_stuff_with_pointer(&arg).await);
+            assert_eq!(60, do_stuff_with_pointer_in_inner_function(&arg).await);
+        }
     }
     #[test]
     #[cfg_attr(any(feature = "generate-async", feature = "generate-blocking"), ignore)]

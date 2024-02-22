@@ -12,6 +12,10 @@ repository.workspace = true
 # Placeholder for now
 include = ["Cargo.toml", "src/lib.rs"]
 
+[[example]]
+name = "simple"
+required-features = ["generate-async", "generate-blocking"]
+
 [features]
 default = ["macros"]
 macros = ["dep:desaturate-macros"]
