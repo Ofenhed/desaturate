@@ -1,4 +1,5 @@
 use core::future::{Future, IntoFuture};
+use core::marker::PhantomData;
 #[cfg(feature = "macros")]
 pub use desaturate_macros::*;
 
@@ -37,9 +38,9 @@ macro_rules! create_asyncable {
     ($T:ident => $($($traits:tt)+)?) => {
         /// This function can be used either asynchronously (with `await`) or synchronously with [`Blocking::call`].
         #[must_use]
-        pub trait Desaturated<'a, $T>: $($($traits)+ +)? 'a + internal::OnlyAutomatic<$T> {}
+        pub trait Desaturated<$T>: $($($traits)+ +)? internal::OnlyAutomatic<$T> {}
         $(
-            impl<'a, $T, U: $($traits)+ + 'a> Desaturated<'a, $T> for U {}
+            impl<$T, U: $($traits)+> Desaturated<$T> for U {}
             impl<$T, U: $($traits)+> internal::OnlyAutomatic<$T> for U {}
         )?
     };
@@ -54,51 +55,55 @@ features! {async !fn: create_asyncable!{ T => IntoFuture<Output = T> }}
 features! {!async !fn: create_asyncable!{ T => }}
 
 features! {!async !fn:
-    impl<'a, O> Desaturated<'a, O> for () {}
+    impl<O> Desaturated<O> for () {}
     impl<O> internal::OnlyAutomatic<O> for () {}
 }
 
-pub trait IntoDesaturatedWith<'fut, 'args: 'fut, Args, Output, Fut>
+pub trait AsyncFnOnce<'a, Args: 'a, Out> {
+    type Output: Future<Output = Out> + 'a;
+    fn call(self, args: Args) -> Self::Output;
+}
+
+impl<'a, Args: 'a, Out, Fun, Fut> AsyncFnOnce<'a, Args, Out> for Fun
 where
-    Args: 'args,
-    Fut: 'fut + Future<Output = Output>,
-    Self: 'fut + FnOnce(Args) -> Fut,
+    Fun: FnOnce(Args) -> Fut,
+    Fut: Future<Output = Out> + 'a,
 {
+    type Output = Fut;
+    fn call(self, args: Args) -> Self::Output {
+        (self)(args)
+    }
+}
+
+pub trait IntoDesaturatedWith<'a, Args: 'a, Output>: AsyncFnOnce<'a, Args, Output> + 'a {
     fn desaturate_with(
         self,
         args: Args,
-        fun: impl FnOnce(Args) -> Output + 'fut,
-    ) -> impl Desaturated<'fut, Output>;
+        fun: impl 'a + FnOnce(Args) -> Output,
+    ) -> impl Desaturated<Output> + 'a;
 }
 
-impl<
-        'fut,
-        'args: 'fut,
-        O: 'fut,
-        A: 'args,
-        F: Future<Output = O> + 'fut,
-        AF: 'fut + FnOnce(A) -> F,
-    > IntoDesaturatedWith<'fut, 'args, A, O, F> for AF
-{
+impl<'a, O: 'a, A: 'a, F: 'a + AsyncFnOnce<'a, A, O>> IntoDesaturatedWith<'a, A, O> for F {
     features! {async fn:
         #[inline(always)]
-        fn desaturate_with(self, args: A, fun: impl 'fut + FnOnce(A) -> O) -> impl Desaturated<'fut, O> {
-            struct Holder<Output, Args, NormalFunc: FnOnce(Args) -> Output, Fut: Future<Output = Output>, AsyncFunc: FnOnce(Args) -> Fut> {
+        fn desaturate_with(self, args: A, fun: impl FnOnce(A) -> O + 'a) -> impl Desaturated<O> + 'a {
+            struct Holder<'a, Output, Args: 'a, NormalFunc: FnOnce(Args) -> Output, AsyncFunc: AsyncFnOnce<'a, Args, Output>> {
                 args: Args,
                 fun: NormalFunc,
                 fut: AsyncFunc,
+                phantom: PhantomData<&'a ()>,
             }
-            impl<Output, Args, NormalFunc: FnOnce(Args) -> Output, Fut: Future<Output = Output>, AsyncFunc: FnOnce(Args) -> Fut> IntoFuture for Holder<Output, Args, NormalFunc, Fut, AsyncFunc> {
+            impl<'a, Output, Args: 'a, NormalFunc: FnOnce(Args) -> Output, AsyncFunc: AsyncFnOnce<'a, Args, Output>> IntoFuture for Holder<'a, Output, Args, NormalFunc, AsyncFunc> {
                 type Output = Output;
 
-                type IntoFuture = Fut;
+                type IntoFuture = AsyncFunc::Output;
 
                 #[inline(always)]
                 fn into_future(self) -> Self::IntoFuture {
-                    (self.fut)(self.args)
+                    self.fut.call(self.args)
                 }
             }
-            impl<Output, Args, NormalFunc: FnOnce(Args) -> Output, Fut: Future<Output = Output>, AsyncFunc: FnOnce(Args) -> Fut> Blocking<Output> for Holder<Output, Args, NormalFunc, Fut, AsyncFunc> {
+            impl<'a, Output, Args: 'a, NormalFunc: FnOnce(Args) -> Output, AsyncFunc: AsyncFnOnce<'a, Args, Output>> Blocking<Output> for Holder<'a, Output, Args, NormalFunc, AsyncFunc> {
                 #[inline(always)]
                 fn call(self) -> Output {
                     (self.fun)(self.args)
@@ -107,7 +112,8 @@ impl<
             Holder {
                 args,
                 fun,
-                fut: self
+                fut: self,
+                phantom: Default::default(),
             }
         }
     }
@@ -145,12 +151,12 @@ impl<
 }
 
 pub trait IntoDesaturated<'a, Output>: IntoFuture<Output = Output> + 'a {
-    fn desaturate(self, fun: impl FnOnce() -> Output + 'a) -> impl Desaturated<'a, Output>;
+    fn desaturate(self, fun: impl FnOnce() -> Output + 'a) -> impl Desaturated<Output> + 'a;
 }
 
 impl<'a, Output: 'a, F: Future<Output = Output> + 'a> IntoDesaturated<'a, Output> for F {
     #[inline(always)]
-    fn desaturate(self, fun: impl FnOnce() -> Output + 'a) -> impl Desaturated<'a, Output> {
+    fn desaturate(self, fun: impl FnOnce() -> Output + 'a) -> impl Desaturated<Output> + 'a {
         (|()| self).desaturate_with((), |()| fun())
     }
 }
@@ -208,15 +214,14 @@ mod tests {
         let sync_stuff = || *with * 2;
         async_stuff.desaturate(sync_stuff)
     }
+    fn do_stuff_with_pointer<'a>(with: &'a i32) -> impl Desaturated<i32> + '_ {
+        let async_stuff = |var: &'a i32| async move { *var * 2 };
+        let sync_stuff = |var: &'a i32| *var * 2;
+        async_stuff.desaturate_with(with, sync_stuff)
+    }
     // TODO: Figure out how to get this to work
-    //fn do_stuff_with(with: &i32) -> impl Desaturated<'_, i32> + '_ {
-    //    let async_stuff = |var: &i32| async move {
-    //        *var * 2
-    //    };
-    //    let sync_stuff = |var: &i32| {
-    //        *var * 2
-    //    };
-    //    async_stuff.desaturate_with(with, sync_stuff)
+    //fn do_stuff_with_pointer_again<'a>(with: &'a i32) -> impl Desaturated<i32> + '_ {
+    //    |var: &i32| async move { *var * 2}.desaturate_with(with, |var: &i32| *var * 2)
     //}
     #[test]
     #[cfg_attr(not(feature = "generate-blocking"), ignore)]
