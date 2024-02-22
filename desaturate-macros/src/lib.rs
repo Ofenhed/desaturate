@@ -831,7 +831,7 @@ mod tests {
     use super::{default, Asyncable};
     use quote::quote;
     #[test]
-    fn async_unchanged() -> syn::Result<()> {
+    fn only_async_unchanged() -> syn::Result<()> {
         let handler = Asyncable {
             attrs: default(),
             make_async: true,
@@ -847,35 +847,6 @@ mod tests {
         let expected = function.clone();
         let result = handler.desaturate(function)?;
         assert_eq!(format!("{result}"), format!("{expected}"));
-        Ok(())
-    }
-    #[test]
-    fn double_gets_complex() -> syn::Result<()> {
-        let handler = Asyncable {
-            attrs: default(),
-            make_async: true,
-            make_sync: true,
-        };
-        let function = quote! {
-            pub async fn do_something(&self, other: i32, _: u8, (a, b, c): (u8, u8, u32)) -> i32 {
-                do_something().await?;
-                self.hello();
-                struct Something {
-                    test: Self,
-                }
-                impl Something {
-                    fn do_it(self, a: i32) {
-                        self.test(a)
-                    }
-                }
-                call_somewhere().await;
-                other * 2
-            }
-        };
-        let expected = function.clone();
-        let result = handler.desaturate(function)?;
-        eprintln!("{result}");
-        assert!(false, "Show result");
         Ok(())
     }
 }
