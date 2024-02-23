@@ -1,15 +1,12 @@
 [package]
 name = "desaturate-macros"
-version = "0.0.0"
+version = "0.0.1"
 edition = "2021"
 description = "Procedural macros for the desaturate crate."
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 keywords = ["experimental"]
-
-# Placeholder for now
-include = ["Cargo.toml", "src/lib.rs"]
 
 [lib]
 proc-macro = true

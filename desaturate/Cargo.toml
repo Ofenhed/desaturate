@@ -1,6 +1,6 @@
 [package]
 name = "desaturate"
-version = "0.0.0"
+version = "0.0.1"
 edition = "2021"
 categories = ["asynchronous", "no-std::no-alloc", "rust-patterns"]
 keywords = ["experimental"]
@@ -9,22 +9,19 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
-# Placeholder for now
-include = ["Cargo.toml", "src/lib.rs"]
-
 [[example]]
 name = "simple"
 required-features = ["generate-async", "generate-blocking", "macros", "std"]
 
 [features]
-default = ["macros", "generate-blocking", "generate-async", "std"]
+default = ["macros", "generate-async", "std"]
 macros = ["dep:desaturate-macros"]
 generate-async = ["desaturate-macros?/generate-async"]
 generate-blocking = ["desaturate-macros?/generate-blocking"]
 std = []
 
 [dependencies]
-desaturate-macros = { version = "0.0.0", path = "../desaturate-macros", optional = true }
+desaturate-macros = { version = "0.0.1", path = "../desaturate-macros", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
