@@ -17,7 +17,6 @@ proc-macro = true
 [features]
 generate-async = []
 generate-blocking = []
-debug = ["syn/extra-traits"]
 
 [dependencies]
 proc-macro2 = "1.0.78"
