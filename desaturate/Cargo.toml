@@ -14,13 +14,14 @@ include = ["Cargo.toml", "src/lib.rs"]
 
 [[example]]
 name = "simple"
-required-features = ["generate-async", "generate-blocking"]
+required-features = ["generate-async", "generate-blocking", "macros", "std"]
 
 [features]
-default = ["macros"]
+default = ["macros", "generate-blocking", "generate-async", "std"]
 macros = ["dep:desaturate-macros"]
 generate-async = ["desaturate-macros?/generate-async"]
 generate-blocking = ["desaturate-macros?/generate-blocking"]
+std = []
 
 [dependencies]
 desaturate-macros = { version = "0.0.0", path = "../desaturate-macros", optional = true }

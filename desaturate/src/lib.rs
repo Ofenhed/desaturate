@@ -1,49 +1,166 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(
+    not(all(
+        feature = "std",
+        feature = "macros",
+        feature = "generate-async",
+        feature = "generate-blocking"
+    )),
+    doc = r#"<div class="warning">This documentation will be incomplete, because of missing feature flags!</div>"#
+)]
+#![cfg_attr(
+    all(
+        feature = "macros",
+        feature = "generate-async",
+        feature = "generate-blocking"
+    ),
+    doc = r#"
+This crate aims at reducing the coloring of rust functions, by simplifying the process of
+creating functions which functions both as async and as blocking functions. This is performed
+with the [`Desaturated`] trait, which implements [`IntoFuture`] and [`Blocking`], depending on
+which feature flags are set.
+
+The idea is that a desaturated function can be created by combining the `async` color with the
+blocking color, as such:
+```
+use desaturate::{Desaturated, IntoDesaturated};
+fn do_something() -> impl Desaturated<()> {
+    async {
+        // Do something here
+    }.desaturate(|| {
+        // Do the same thing here
+    })
+}
+```
+
+Now, this doesn't reduce code duplication, per se, but it can enable it, especially when used
+with the [`desaturate`] macro. This allows us to create functions like this:
+```
+use desaturate::{desaturate, Blocking};
+
+#[desaturate]
+async fn do_the_thing(arg: i32) -> i32 {
+    arg * 2
+}
+
+#[desaturate]
+async fn do_something(arg1: i32, arg2: i32) -> i32 {
+    do_the_thing(arg1).await + do_the_thing(arg2).await
+}
+
+fn main() {
+    let result = do_something(5, 10).call();
+    println!("I got to play with the async functions, and got {result}");
+}
+```
+
+This also takes care of lifetimes, so you can make functions which track (or ignore) lifetimes.
+```
+use desaturate::{desaturate, Blocking};
+
+#[desaturate]
+async fn add_1(i: &mut i32) -> i32 {
+    let old = *i;
+    *i += 1;
+    old
+}
+
+fn main() {
+    let mut value = 5;
+    println!("Counting: {}", add_1(&mut value).call());
+    println!("Counting: {}", add_1(&mut value).call());
+    assert_eq!(value, 7);
+}
+```
+
+It can also be used on member functions, as such:
+```
+use desaturate::{desaturate, Blocking};
+
+struct MyType<'a> {
+    inner: i32,
+    pointer: &'a i32,
+}
+
+impl<'a> MyType<'a> {
+    #[desaturate(debug_dump, lifetime = "'a")]
+    async fn get_inner_mut(&mut self) -> &mut i32 {
+        &mut self.inner
+    }
+    #[desaturate]
+    async fn get_pointer(&self) -> &'a i32 {
+        self.pointer
+    }
+}
+"#
+)]
+
 use core::future::{Future, IntoFuture};
-use core::marker::PhantomData;
+
+#[cfg(feature = "std")]
+pub mod boxed;
+
+#[macro_use]
+mod macros;
+use macros::*;
+
 #[cfg(feature = "macros")]
+/// This macro will try to automatic add the trait [`Desaturated`] to a function signature.
+#[cfg_attr(
+    all(
+        feature = "macros",
+        feature = "generate-async",
+        feature = "generate-blocking"
+    ),
+    doc = r#"
+```
+use desaturate::{Blocking, desaturate, IntoDesaturated, IntoDesaturatedWith, Desaturated, boxed::BoxedDesaturated};
+#[desaturate]
+async fn do_something(arg: i32) -> i32 {
+    other_function(arg).await
+}
+
+#[desaturate]
+async fn other_function(arg: i32) -> i32 {
+    arg * 2
+}
+
+# #[tokio::main]
+async fn main() {
+    assert_eq!(do_something(5).await, do_something(5).call())
+}
+```"#
+)]
+///
+/// Available attributes:
+/// ```
+/// # use desaturate::desaturate;
+/// // Dump the result generated code into stderr:
+/// #[desaturate(debug_dump)]
+/// # async fn do_nothing() {}
+/// # struct Test<'a>(&'a ());
+/// # impl<'a> Test<'a> {
+///
+/// // Use the lifetime 'a instead of a generated one for the lifetime of impl Desaturated<_>.
+/// #[desaturate(lifetime = "'a")]
+/// # async fn inner(&self) -> &() { self.0 }
+/// # }
+/// ```
+/// Multiple attributes can be added with comma separation.
 pub use desaturate_macros::*;
 
 #[must_use]
 pub trait Blocking<Output: Sized> {
     fn call(self) -> Output;
 }
+impl<Output, T: FnOnce() -> Output> Blocking<Output> for T {
+    fn call(self) -> Output {
+        (self)()
+    }
+}
 
 mod internal {
     pub trait OnlyAutomatic<Output> {}
-}
-
-macro_rules! features {
-    (: $($rest:tt)+) => {
-        $($rest)+
-    };
-    (async $($rest:tt)+) => {
-        #[cfg(feature = "generate-async")]
-        features!{ $($rest)+ }
-    };
-    (!async $($rest:tt)+) => {
-        #[cfg(not(feature = "generate-async"))]
-        features!{ $($rest)+ }
-    };
-    (fn $($rest:tt)+) => {
-        #[cfg(feature = "generate-blocking")]
-        features!{ $($rest)+ }
-    };
-    (!fn $($rest:tt)+) => {
-        #[cfg(not(feature = "generate-blocking"))]
-        features!{ $($rest)+ }
-    };
-}
-
-macro_rules! create_asyncable {
-    ($T:ident => $($($traits:tt)+)?) => {
-        /// This function can be used either asynchronously (with `await`) or synchronously with [`Blocking::call`].
-        #[must_use]
-        pub trait Desaturated<$T>: $($($traits)+ +)? internal::OnlyAutomatic<$T> {}
-        $(
-            impl<$T, U: $($traits)+> Desaturated<$T> for U {}
-            impl<$T, U: $($traits)+> internal::OnlyAutomatic<$T> for U {}
-        )?
-    };
 }
 
 features! {async fn: create_asyncable!{ T => Blocking<T> + IntoFuture<Output = T> }}
@@ -91,7 +208,7 @@ impl<'a, O: 'a, A: 'a, F: 'a + AsyncFnOnce<'a, A, O>> IntoDesaturatedWith<'a, A,
                 args: Args,
                 fun: NormalFunc,
                 fut: AsyncFunc,
-                phantom: PhantomData<&'a ()>,
+                phantom: core::marker::PhantomData<&'a ()>,
             }
             impl<'a, Output, Args: 'a, NormalFunc: FnOnce(Args) -> Output, AsyncFunc: AsyncFnOnce<'a, Args, Output>> IntoFuture for Holder<'a, Output, Args, NormalFunc, AsyncFunc> {
                 type Output = Output;
@@ -119,18 +236,19 @@ impl<'a, O: 'a, A: 'a, F: 'a + AsyncFnOnce<'a, A, O>> IntoDesaturatedWith<'a, A,
     }
     features! {async !fn:
         #[inline(always)]
-        fn desaturate_with(self, args: A, _: impl FnOnce(A) -> O) -> impl Desaturated<'fut, O> {
-            self(args)
+        fn desaturate_with(self, args: A, _: impl FnOnce(A) -> O) -> impl Desaturated<O> + 'a {
+            self.call(args)
         }
     }
     features! {!async fn:
         #[inline(always)]
-        fn desaturate_with(self, args: A, fun: impl FnOnce(A) -> O) -> impl Desaturated<'fut, O> {
-            struct Holder<'args, 'fut, Output, Args: 'args, Function: 'fut + FnOnce(Args) -> Output> {
+        fn desaturate_with(self, args: A, fun: impl FnOnce(A) -> O + 'a) -> impl Desaturated<O> + 'a {
+            struct Holder<'a, Output, Args: 'a, Function: FnOnce(Args) -> Output> {
                 args: Args,
                 fun: Function,
+                phantom: core::marker::PhantomData<&'a ()>,
             }
-            impl<'args, 'fut, Output, Args: 'args, Function: 'fut + FnOnce(Args) -> Output> Blocking<Output> for Holder<'args, 'fut, Output, Args, Function> {
+            impl<'a, Output, Args: 'a, Function: FnOnce(Args) -> Output> Blocking<Output> for Holder<'a, Output, Args, Function> {
                 #[inline(always)]
                 fn call(self) -> Output {
                     (self.fun)(self.args)
@@ -139,12 +257,13 @@ impl<'a, O: 'a, A: 'a, F: 'a + AsyncFnOnce<'a, A, O>> IntoDesaturatedWith<'a, A,
             Holder {
                 args,
                 fun,
+                phantom: Default::default(),
             }
         }
     }
     features! {!async !fn:
         #[inline(always)]
-        fn desaturate_with(self, _: A, _: impl FnOnce(A) -> O) -> impl Desaturated<'fut, O> {
+        fn desaturate_with(self, _: A, _: impl FnOnce(A) -> O) -> impl Desaturated<O> +'a {
             ()
         }
     }

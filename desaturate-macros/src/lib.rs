@@ -128,6 +128,7 @@ impl AsyncFunction {
 
 struct FunctionState<'a> {
     function: &'a AsyncFunction,
+    options: &'a Asyncable,
     args_tuple_type: OnceCell<Punctuated<Type, Token![,]>>,
     async_let_statement: OnceCell<ExprLet>,
     async_name: OnceCell<Ident>,
@@ -146,10 +147,11 @@ struct FunctionState<'a> {
     simple_input_variables_tuple: OnceCell<syn::ExprTuple>,
 }
 
-impl<'a> From<&'a AsyncFunction> for FunctionState<'a> {
-    fn from(function: &'a AsyncFunction) -> Self {
+impl<'a> FunctionState<'a> {
+    fn new(options: &'a Asyncable, function: &'a AsyncFunction) -> Self {
         Self {
             function,
+            options,
             args_tuple_type: default(),
             async_let_statement: default(),
             async_name: default(),
@@ -188,26 +190,31 @@ impl FunctionState<'_> {
             }
         })
     }
+    fn manual_lifetime(&self) -> Option<&syn::Lifetime> {
+        self.options.lifetime.as_ref()
+    }
     fn desaturated_lifetime(&self) -> Option<&syn::Lifetime> {
-        self.desaturated_lifetime
-            .get_or_init(|| {
-                self.inputs
-                    .iter()
-                    .find(|x| match x {
-                        FnArg::Receiver(syn::Receiver {
-                            reference: Some(_), ..
-                        }) => true,
-                        FnArg::Typed(syn::PatType { ty, .. }) => {
-                            matches!(**ty, syn::Type::Reference(_))
-                        }
-                        _ => false,
-                    })
-                    .map(|_| syn::Lifetime {
-                        apostrophe: self.generics.span(),
-                        ident: self.new_ident(Ident::new("desaturated", self.generics.span())),
-                    })
-            })
-            .as_ref()
+        self.manual_lifetime().or_else(|| {
+            self.desaturated_lifetime
+                .get_or_init(|| {
+                    self.inputs
+                        .iter()
+                        .find(|x| match x {
+                            FnArg::Receiver(syn::Receiver {
+                                reference: Some(_), ..
+                            }) => true,
+                            FnArg::Typed(syn::PatType { ty, .. }) => {
+                                matches!(**ty, syn::Type::Reference(_))
+                            }
+                            _ => false,
+                        })
+                        .map(|_| syn::Lifetime {
+                            apostrophe: self.generics.span(),
+                            ident: self.new_ident(Ident::new("desaturated", self.generics.span())),
+                        })
+                })
+                .as_ref()
+        })
     }
     fn new_return_type(&self) -> &syn::Result<ReturnType> {
         self.new_return_type.get_or_init(|| {
@@ -235,8 +242,18 @@ impl FunctionState<'_> {
             };
             let mut bounds = Punctuated::new();
             if let Some(desaturated_lifetime) = self.desaturated_lifetime() {
-                bounds.push(TypeParamBound::Lifetime(desaturated_lifetime.clone()));
+                if self.manual_lifetime().is_none() {
+                    bounds.push(TypeParamBound::Lifetime(desaturated_lifetime.clone()));
+                }
             }
+            let output_type = {
+                let mut output = output_type.clone();
+                if let Some(desaturated_lifetime) = self.desaturated_lifetime() {
+                    let mut set_default = DefaultLifetime(desaturated_lifetime);
+                    set_default.visit_type_mut(&mut output);
+                }
+                output
+            };
             bounds.push(TypeParamBound::Trait(syn::TraitBound {
                 paren_token: default(),
                 modifier: syn::TraitBoundModifier::None,
@@ -282,6 +299,9 @@ impl FunctionState<'_> {
     fn new_generics(&self) -> &Generics {
         self.new_generics.get_or_init(|| {
             let mut generics = self.generics.clone();
+            if self.manual_lifetime().is_some() {
+                return generics;
+            }
             if let Some(new_lifetime) = self.desaturated_lifetime() {
                 generics
                     .lifetimes_mut()
@@ -707,16 +727,86 @@ impl FunctionState<'_> {
     //}
 }
 
+#[derive(Default)]
 struct Asyncable {
-    attrs: TokenStream2,
-    make_sync: bool,
+    debug_dump: Option<Span>,
+    lifetime: Option<Lifetime>,
+    make_blocking: bool,
     make_async: bool,
+}
+
+impl Parse for Asyncable {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        struct Setting {
+            name: Ident,
+            value: Option<(Token![=], syn::Lit)>,
+        }
+        impl Setting {
+            fn span(&self) -> Span {
+                let span = self.name.span();
+                if let Some((token, lit)) = &self.value {
+                    span.join(token.span()).unwrap().join(lit.span()).unwrap()
+                } else {
+                    span
+                }
+            }
+        }
+        impl Parse for Setting {
+            fn parse(input: ParseStream) -> syn::Result<Self> {
+                let name = input.parse()?;
+                let value = if input.peek(Token![=]) {
+                    Some((input.parse()?, input.parse()?))
+                } else {
+                    None
+                };
+                Ok(Self { name, value })
+            }
+        }
+        let mut result = Asyncable {
+            make_blocking: cfg!(feature = "generate-blocking"),
+            make_async: cfg!(feature = "generate-async"),
+            ..Asyncable::default()
+        };
+        let mut errors: Vec<syn::Error> = vec![];
+        Punctuated::<Setting, Token![,]>::parse_terminated(input)?
+            .iter()
+            .for_each(|setting| match setting {
+                setting @ Setting { name, value: None } if name == "debug_dump" => {
+                    result.debug_dump = Some(setting.span())
+                }
+                Setting {
+                    name,
+                    value: Some((_eq, syn::Lit::Str(lifetime))),
+                } if name == "lifetime" => match lifetime.parse() {
+                    Ok(lifetime) => result.lifetime = lifetime,
+                    Err(e) => errors.push(e),
+                },
+                invalid => errors.push(syn::Error::new(invalid.span(), "Invalid setting")),
+            });
+        let errors = errors
+            .into_iter()
+            .fold(Option::<syn::Error>::None, |prev, err| {
+                Some(prev.map_or(err.clone(), move |mut old_err| {
+                    old_err.combine(err);
+                    old_err
+                }))
+            });
+        if let Some(errors) = errors {
+            Err(errors)
+        } else {
+            Ok(result)
+        }
+    }
+}
+
+impl Asyncable {
+    fn from_attributes(input: TokenStream2) -> syn::Result<Self> {
+        parse2(input)
+    }
 }
 
 struct PrintFunctionState<'a, 'b: 'a> {
     state: &'a FunctionState<'b>,
-    make_async: bool,
-    make_blocking: bool,
 }
 
 impl ToTokens for PrintFunctionState<'_, '_> {
@@ -724,6 +814,12 @@ impl ToTokens for PrintFunctionState<'_, '_> {
         let PrintFunctionState {
             state:
                 state @ FunctionState {
+                    options:
+                        Asyncable {
+                            make_blocking,
+                            make_async,
+                            ..
+                        },
                     function:
                         AsyncFunction {
                             visibility,
@@ -742,8 +838,6 @@ impl ToTokens for PrintFunctionState<'_, '_> {
                         },
                     ..
                 },
-            make_async,
-            make_blocking,
         } = self;
         visibility.to_tokens(tokens);
         constness.to_tokens(tokens);
@@ -789,30 +883,19 @@ impl ToTokens for PrintFunctionState<'_, '_> {
 }
 
 impl Asyncable {
-    fn create(attrs: impl Into<TokenStream2>) -> Self {
-        let attrs: TokenStream2 = attrs.into();
-        Asyncable {
-            attrs,
-            make_sync: cfg!(feature = "generate-blocking"),
-            make_async: cfg!(feature = "generate-async"),
-        }
-    }
     fn desaturate(&self, item: TokenStream2) -> syn::Result<TokenStream2> {
-        match (self.make_async, self.make_sync) {
-            (false, false) => Err(syn::Error::new(self.attrs.span(), "desaturate-macros requires one of 'generate-async' or 'generate-non-async' features to be active"))?,
+        match (self.make_async, self.make_blocking) {
+            (false, false) => Err(syn::Error::new(Span::call_site(), "desaturate-macros requires one of 'generate-async' or 'generate-non-async' features to be active"))?,
             (true, false) => Ok(item),
-            (make_async, make_sync) => {
-                #[cfg(feature = "debug")]
-                eprintln!("Generating async({make_async}) and blocking({make_sync})");
+            _ => {
                 let function: AsyncFunction = parse2(item)?;
-                let state: FunctionState = (&function).into();
+                let state = FunctionState::new(self, &function);
                 let result = PrintFunctionState {
                     state: &state,
-                    make_async,
-                    make_blocking: make_sync,
                 }.into_token_stream();
-                #[cfg(feature = "debug")]
-                eprintln!("Rendered code {result}");
+                if self.debug_dump.is_some() {
+                    eprintln!("{result}");
+                }
                 Ok(result)
             },
         }
@@ -821,11 +904,13 @@ impl Asyncable {
 
 #[proc_macro_attribute]
 pub fn desaturate(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let handler = Asyncable::create(attr);
-    handler
-        .desaturate(item.into())
-        .unwrap_or_else(syn::Error::into_compile_error)
-        .into()
+    match Asyncable::from_attributes(attr.into()) {
+        Ok(handler) => handler
+            .desaturate(item.into())
+            .unwrap_or_else(syn::Error::into_compile_error)
+            .into(),
+        Err(e) => e.into_compile_error().into(),
+    }
 }
 
 #[cfg(test)]
@@ -835,9 +920,10 @@ mod tests {
     #[test]
     fn only_async_unchanged() -> syn::Result<()> {
         let handler = Asyncable {
-            attrs: default(),
+            lifetime: None,
+            debug_dump: Some(proc_macro2::Span::call_site()),
             make_async: true,
-            make_sync: false,
+            make_blocking: false,
         };
         let function = quote! {
             pub async fn do_something(other: i32) -> i32 {
