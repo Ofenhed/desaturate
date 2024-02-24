@@ -115,7 +115,7 @@ impl ToTokens for PrintFunctionState<'_, '_> {
                         AsyncFunction {
                             visibility,
                             constness,
-                            asyncness,
+                            _asyncness,
                             unsafety,
                             fn_token,
                             ident,
@@ -132,9 +132,6 @@ impl ToTokens for PrintFunctionState<'_, '_> {
         } = self;
         visibility.to_tokens(tokens);
         constness.to_tokens(tokens);
-        if !*make_blocking && *make_async {
-            asyncness.to_tokens(tokens);
-        }
         unsafety.to_tokens(tokens);
         fn_token.to_tokens(tokens);
         ident.to_tokens(tokens);
@@ -158,16 +155,23 @@ impl ToTokens for PrintFunctionState<'_, '_> {
                     ::desaturate::IntoDesaturatedWith::desaturate_with(#async_var, #args_var, #blocking_var)
                 }.to_tokens(tokens);
             } else if *make_blocking {
-                let blocking_let = state.blocking_let_statement();
-                let blocking_var = state.blocking_name();
+                let blocking_body = state.blocking_function_body();
+                let warning = format!("Tried to await Desaturated from {} when desaturate wasn't compiled with \"async\"", state.function.ident);
                 quote_spanned!{body.span()=>
-                    #blocking_let;
-                    #blocking_var
+                    ::desaturate::IntoDesaturated::desaturate(async { unreachable!(#warning) }, move || #blocking_body)
                 }.to_tokens(tokens);
             } else if *make_async {
-                body.stmts.iter().for_each(|x| x.to_tokens(tokens));
+                let async_body = &state.body;
+                let warning = format!("Tried to call Desaturated from {} when desaturate wasn't compiled with \"blocking\"", state.function.ident);
+                quote_spanned!{body.span()=>
+                    ::desaturate::IntoDesaturated::desaturate(async move #async_body, || unreachable!(#warning))
+                }.to_tokens(tokens);
             } else {
-                unreachable!()
+                let async_warning = format!("Tried to await Desaturated from {} when desaturate wasn't compiled with \"async\"", state.function.ident);
+                let blocking_warning = format!("Tried to call Desaturated from {} when desaturate wasn't compiled with \"blocking\"", state.function.ident);
+                quote_spanned!{body.span()=>
+                    ::desaturate::IntoDesaturated::desaturate(async { unreachable!(#async_warning) }, || unreachable!(#blocking_warning))
+                }.to_tokens(tokens);
             }
         });
     }
@@ -175,21 +179,13 @@ impl ToTokens for PrintFunctionState<'_, '_> {
 
 impl Asyncable {
     fn desaturate(&self, item: TokenStream2) -> syn::Result<TokenStream2> {
-        match (self.make_async, self.make_blocking) {
-            (false, false) => Err(syn::Error::new(Span::call_site(), "desaturate-macros requires one of 'generate-async' or 'generate-non-async' features to be active"))?,
-            (true, false) => Ok(item),
-            _ => {
-                let function: AsyncFunction = parse2(item)?;
-                let state = FunctionState::new(self, &function);
-                let result = PrintFunctionState {
-                    state: &state,
-                }.into_token_stream();
-                if self.debug_dump.is_some() {
-                    eprintln!("{result}");
-                }
-                Ok(result)
-            },
+        let function: AsyncFunction = parse2(item)?;
+        let state = FunctionState::new(self, &function);
+        let result = PrintFunctionState { state: &state }.into_token_stream();
+        if self.debug_dump.is_some() {
+            eprintln!("{result}");
         }
+        Ok(result)
     }
 }
 

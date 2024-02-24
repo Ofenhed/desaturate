@@ -14,7 +14,7 @@ use crate::{default, visitors::IdentityVisitor};
 pub(crate) struct AsyncFunction {
     pub visibility: Visibility,
     pub constness: Option<Token![const]>,
-    pub asyncness: Token![async],
+    pub _asyncness: Token![async],
     pub unsafety: Option<Token![unsafe]>,
     pub fn_token: Token![fn],
     pub ident: Ident,
@@ -33,7 +33,7 @@ impl Parse for AsyncFunction {
         let function = Self {
             visibility: input.parse()?,
             constness: input.parse()?,
-            asyncness: input.parse()?,
+            _asyncness: input.parse()?,
             unsafety: input.parse()?,
             fn_token: input.parse()?,
             ident: input.parse()?,

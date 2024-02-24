@@ -1,10 +1,6 @@
 //! ### Recursion
 #![cfg_attr(
-    all(
-        feature = "generate-async",
-        feature = "generate-blocking",
-        feature = "macros"
-    ),
+    all(feature = "async", feature = "blocking", feature = "macros"),
     doc = r#"
 This code may look innocent, but it will fail to compile with error [`E0720`]:
 ```compile_fail
@@ -48,8 +44,10 @@ async fn main() {
 [`E0720`]: https://doc.rust-lang.org/error_codes/E0720.html
 "#
 )]
-use crate::{macros::features, Desaturated};
+use crate::{internal::InternalOnlyImpl, macros::features, Desaturated};
 use core::{future::Future, pin::Pin};
+
+impl<O, T: InternalOnlyImpl<O>> InternalOnlyImpl<O> for Box<T> {}
 
 /// A trait to enable dynamic dispatching for [`desaturate()`].
 ///
@@ -69,7 +67,7 @@ impl<'a, Out, D: Desaturated<Out> + 'a> BoxedDesaturated<'a, Out> for D {
         }
         features! {!async:
             use core::future::IntoFuture;
-            Box::pin(async {panic!(r#"Called a the blocking function of a Desaturated without the "generate-blocking" feature flag"#) }.into_future())
+            Box::pin(async {panic!(r#"Called a the async function of a Desaturated without the "async" feature flag"#) }.into_future())
         }
     }
     type BoxedBlocking = Box<dyn FnOnce() -> Out + 'a>;
@@ -81,7 +79,7 @@ impl<'a, Out, D: Desaturated<Out> + 'a> BoxedDesaturated<'a, Out> for D {
             })
         }
         features! {!fn:
-            Box::new(|| panic!(r#"Called a the blocking function of a Desaturated without the "generate-blocking" feature flag"#))
+            Box::new(|| panic!(r#"Called a the blocking function of a Desaturated without the "blocking" feature flag"#))
         }
     }
 }
@@ -111,7 +109,7 @@ impl<'a, Out, Args: 'a, D: Desaturated<Out> + 'a, F: FnOnce(Args) -> D + 'a>
         }
         features! {!async:
             use core::future::IntoFuture;
-            Box::new(|_| Box::pin(async { panic!(r#"Called a the async function of a DesaturatedWith without the "generate-async" feature flag"#) }.into_future()))
+            Box::new(|_| Box::pin(async { panic!(r#"Called a the async function of a DesaturatedWith without the "async" feature flag"#) }.into_future()))
         }
     }
     #[inline(always)]
@@ -120,7 +118,7 @@ impl<'a, Out, Args: 'a, D: Desaturated<Out> + 'a, F: FnOnce(Args) -> D + 'a>
             Box::new(move |args| self(args).call())
         }
         features! {!fn:
-            Box::new(|_| panic!(r#"Called a the blocking function of a BoxedDesaturatedWith without the "generate-blocking" feature flag"#))
+            Box::new(|_| panic!(r#"Called a the blocking function of a BoxedDesaturatedWith without the "blocking" feature flag"#))
         }
     }
 }

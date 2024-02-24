@@ -20,6 +20,7 @@ pub(crate) struct FunctionState<'a> {
     async_let_statement: OnceCell<syn::ExprLet>,
     async_name: OnceCell<Ident>,
     blocking_body_without_self: OnceCell<Block>,
+    blocking_function_body: OnceCell<Block>,
     blocking_let_statement: OnceCell<syn::ExprLet>,
     blocking_name: OnceCell<Ident>,
     body_without_self: OnceCell<Block>,
@@ -43,6 +44,7 @@ impl<'a> FunctionState<'a> {
             async_let_statement: default(),
             async_name: default(),
             blocking_body_without_self: default(),
+            blocking_function_body: default(),
             blocking_let_statement: default(),
             blocking_name: default(),
             body_without_self: default(),
@@ -457,6 +459,14 @@ impl FunctionState<'_> {
             elems: self.function_arguments_without_self().clone(),
         })
     }
+    pub fn blocking_function_body(&self) -> &Block {
+        self.blocking_function_body.get_or_init(|| {
+            let mut visitor = AsyncStripper;
+            let mut body = self.body.clone();
+            visitor.visit_block_mut(&mut body);
+            body
+        })
+    }
     pub fn blocking_body_without_self(&self) -> &Block {
         self.blocking_body_without_self.get_or_init(|| {
             let mut visitor = AsyncStripper;
@@ -464,9 +474,6 @@ impl FunctionState<'_> {
             visitor.visit_block_mut(&mut body);
             body
         })
-    }
-    pub fn async_function_body(&self) -> &Block {
-        self.body_without_self()
     }
     pub fn async_name(&self) -> &Ident {
         self.async_name
@@ -503,7 +510,7 @@ impl FunctionState<'_> {
                     attrs: default(),
                     async_token: default(),
                     capture: Some(default()),
-                    block: self.async_function_body().clone(),
+                    block: self.body_without_self().clone(),
                 })),
             })),
         })

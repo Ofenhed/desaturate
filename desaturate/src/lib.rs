@@ -3,17 +3,13 @@
     not(all(
         feature = "std",
         feature = "macros",
-        feature = "generate-async",
-        feature = "generate-blocking"
+        feature = "async",
+        feature = "blocking"
     )),
     doc = r#"<div class="warning">This documentation will be incomplete, because of missing feature flags!</div>"#
 )]
 #![cfg_attr(
-    all(
-        feature = "macros",
-        feature = "generate-async",
-        feature = "generate-blocking"
-    ),
+    all(feature = "macros", feature = "async", feature = "blocking"),
     doc = r#"
 This crate aims at reducing the coloring of rust functions, by simplifying the process of
 creating functions which functions both as async and as blocking functions. This is performed
@@ -109,8 +105,9 @@ use macros::*;
 #[cfg_attr(
     all(
         feature = "macros",
-        feature = "generate-async",
-        feature = "generate-blocking"
+        feature = "async",
+        feature = "blocking",
+        feature = "std"
     ),
     doc = r#"
 ```
@@ -136,14 +133,14 @@ async fn main() {
 /// ```
 /// # use desaturate::desaturate;
 /// // Dump the result generated code into stderr:
-/// #[desaturate(debug_dump)]
+/// #[desaturate]
 /// # async fn do_nothing() {}
-/// # struct Test<'a>(&'a ());
+/// # struct Test<'a>(&'a i32);
 /// # impl<'a> Test<'a> {
 ///
 /// // Use the lifetime 'a instead of a generated one for the lifetime of impl Desaturated<_>.
 /// #[desaturate(lifetime = "'a")]
-/// # async fn inner(&self) -> &() { self.0 }
+/// # async fn inner(&self) -> &i32 { self.0 }
 /// # }
 /// ```
 /// Multiple attributes can be added with comma separation.
@@ -160,7 +157,7 @@ impl<Output, T: FnOnce() -> Output> Blocking<Output> for T {
 }
 
 mod internal {
-    pub trait OnlyAutomatic<Output> {}
+    pub trait InternalOnlyImpl<Output> {}
 }
 
 features! {async fn: create_asyncable!{ T => Blocking<T> + IntoFuture<Output = T> }}
@@ -173,7 +170,7 @@ features! {!async !fn: create_asyncable!{ T => }}
 
 features! {!async !fn:
     impl<O> Desaturated<O> for () {}
-    impl<O> internal::OnlyAutomatic<O> for () {}
+    impl<O> internal::InternalOnlyImpl<O> for () {}
 }
 
 pub trait AsyncFnOnce<'a, Args: 'a, Out> {
@@ -226,6 +223,7 @@ impl<'a, O: 'a, A: 'a, F: 'a + AsyncFnOnce<'a, A, O>> IntoDesaturatedWith<'a, A,
                     (self.fun)(self.args)
                 }
             }
+            impl<'a, Output, Args: 'a, NormalFunc: FnOnce(Args) -> Output, AsyncFunc: AsyncFnOnce<'a, Args, Output>> internal::InternalOnlyImpl<Output> for Holder<'a, Output, Args, NormalFunc, AsyncFunc> {}
             Holder {
                 args,
                 fun,
@@ -237,7 +235,19 @@ impl<'a, O: 'a, A: 'a, F: 'a + AsyncFnOnce<'a, A, O>> IntoDesaturatedWith<'a, A,
     features! {async !fn:
         #[inline(always)]
         fn desaturate_with(self, args: A, _: impl FnOnce(A) -> O) -> impl Desaturated<O> + 'a {
-            self.call(args)
+            struct Holder<Out, T: Future<Output = Out>>(T);
+            impl<Out, T: Future<Output = Out>> internal::InternalOnlyImpl<Out> for Holder<Out, T> {}
+            impl<Out, T: Future<Output = Out>> IntoFuture for Holder<Out, T> {
+                type Output = Out;
+
+                type IntoFuture = T;
+
+                #[inline(always)]
+                fn into_future(self) -> T {
+                    self.0
+                }
+            }
+            Holder(self.call(args))
         }
     }
     features! {!async fn:
@@ -248,6 +258,7 @@ impl<'a, O: 'a, A: 'a, F: 'a + AsyncFnOnce<'a, A, O>> IntoDesaturatedWith<'a, A,
                 fun: Function,
                 phantom: core::marker::PhantomData<&'a ()>,
             }
+            impl<'a, Output, Args: 'a, Function: FnOnce(Args) -> Output> internal::InternalOnlyImpl<Output> for Holder<'a, Output, Args, Function> {}
             impl<'a, Output, Args: 'a, Function: FnOnce(Args) -> Output> Blocking<Output> for Holder<'a, Output, Args, Function> {
                 #[inline(always)]
                 fn call(self) -> Output {
@@ -287,9 +298,9 @@ mod tests {
     #[allow(unused_imports)]
     use core::sync::atomic::{AtomicBool, Ordering};
     #[test]
-    #[cfg_attr(not(feature = "generate-blocking"), ignore)]
+    #[cfg_attr(not(feature = "blocking"), ignore)]
     fn normal_returns_right() {
-        #[cfg(feature = "generate-blocking")]
+        #[cfg(feature = "blocking")]
         {
             let async_executed = AtomicBool::new(false);
             let normal_executed = AtomicBool::new(false);
@@ -308,9 +319,9 @@ mod tests {
         }
     }
     #[tokio::test]
-    #[cfg_attr(not(feature = "generate-async"), ignore)]
+    #[cfg_attr(not(feature = "async"), ignore)]
     async fn async_returns_right() {
-        #[cfg(feature = "generate-async")]
+        #[cfg(feature = "async")]
         {
             let async_executed = AtomicBool::new(false);
             let normal_executed = AtomicBool::new(false);
@@ -348,9 +359,9 @@ mod tests {
         async_stuff.desaturate_with(with, sync_stuff)
     }
     #[test]
-    #[cfg_attr(not(feature = "generate-blocking"), ignore)]
+    #[cfg_attr(not(feature = "blocking"), ignore)]
     fn can_take_pointer() {
-        #[cfg(feature = "generate-blocking")]
+        #[cfg(feature = "blocking")]
         {
             assert_eq!(20, do_stuff(&10).call());
             let arg = 30;
@@ -359,9 +370,9 @@ mod tests {
         }
     }
     #[tokio::test]
-    #[cfg_attr(not(feature = "generate-async"), ignore)]
+    #[cfg_attr(not(feature = "async"), ignore)]
     async fn async_can_take_pointer() {
-        #[cfg(feature = "generate-async")]
+        #[cfg(feature = "async")]
         {
             assert_eq!(20, do_stuff(&10).await);
             let arg = 30;
@@ -370,7 +381,7 @@ mod tests {
         }
     }
     #[test]
-    #[cfg_attr(any(feature = "generate-async", feature = "generate-blocking"), ignore)]
+    #[cfg_attr(any(feature = "async", feature = "blocking"), ignore)]
     fn it_always_builds() {
         _ = do_stuff(&10)
     }

@@ -3,19 +3,19 @@ macro_rules! features {
         $($rest)+
     };
     (async $($rest:tt)+) => {
-        #[cfg(feature = "generate-async")]
+        #[cfg(feature = "async")]
         features!{ $($rest)+ }
     };
     (!async $($rest:tt)+) => {
-        #[cfg(not(feature = "generate-async"))]
+        #[cfg(not(feature = "async"))]
         features!{ $($rest)+ }
     };
     (fn $($rest:tt)+) => {
-        #[cfg(feature = "generate-blocking")]
+        #[cfg(feature = "blocking")]
         features!{ $($rest)+ }
     };
     (!fn $($rest:tt)+) => {
-        #[cfg(not(feature = "generate-blocking"))]
+        #[cfg(not(feature = "blocking"))]
         features!{ $($rest)+ }
     };
 }
@@ -26,9 +26,9 @@ macro_rules! create_asyncable {
         /// directly implemented, as this would break the [additive features
         /// guideline](https://doc.rust-lang.org/cargo/reference/features.html#feature-unification).
         ///
-        /// When the flag `generate-async` is set, this trait implements [`IntoFuture`].
+        /// When the flag `async` is set, this trait implements [`IntoFuture`].
         ///
-        /// When the flag `generate-blocking` is set, this trait implements [`Blocking`].
+        /// When the flag `blocking` is set, this trait implements [`Blocking`].
         ///
         /// Note that the [`into_future()`] (which is implicitly called when you use `.await`) and
         /// [`call()`] functions both consume this value, and the arguments. For this reason, your
@@ -37,10 +37,9 @@ macro_rules! create_asyncable {
         /// [`IntoFuture`]: core::future::IntoFuture
         /// [`into_future()`]: core::future::IntoFuture::into_future
         /// [`call()`]: Blocking::call
-        pub trait Desaturated<$T>: $($($traits)+ +)? internal::OnlyAutomatic<$T> {}
+        pub trait Desaturated<$T>: $($($traits)+ +)? internal::InternalOnlyImpl<$T> {}
         $(
-            impl<$T, U: $($traits)+> Desaturated<$T> for U {}
-            impl<$T, U: $($traits)+> internal::OnlyAutomatic<$T> for U {}
+            impl<$T, U: $($traits)+ + internal::InternalOnlyImpl<$T>> Desaturated<$T> for U {}
         )?
     };
 }
