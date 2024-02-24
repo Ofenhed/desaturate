@@ -44,10 +44,10 @@ async fn main() {
 [`E0720`]: https://doc.rust-lang.org/error_codes/E0720.html
 "#
 )]
-use crate::{internal::InternalOnlyImpl, macros::features, Desaturated};
+use crate::{macros::features, private::Sealed, Desaturated};
 use core::{future::Future, pin::Pin};
 
-impl<O, T: InternalOnlyImpl<O>> InternalOnlyImpl<O> for Box<T> {}
+impl<O, T: Sealed<O>> Sealed<O> for Box<T> {}
 
 /// A trait to enable dynamic dispatching for [`desaturate()`].
 ///

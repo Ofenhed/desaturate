@@ -1,6 +1,6 @@
 use crate::default;
 use std::collections::HashSet;
-use syn::{spanned::Spanned, visit, visit_mut, Ident, punctuated::Punctuated, Token};
+use syn::{punctuated::Punctuated, spanned::Spanned, visit, visit_mut, Ident, Token};
 pub use syn::{visit::Visit, visit_mut::VisitMut};
 
 #[derive(Default)]
@@ -56,7 +56,8 @@ impl VisitMut for AsyncStripper {
             base,
             dot_token: _,
             await_token,
-        }) = expr {
+        }) = expr
+        {
             *expr = syn::Expr::Call(syn::ExprCall {
                 attrs: attrs.clone(),
                 func: Box::new(syn::Expr::Path(syn::ExprPath {
@@ -110,31 +111,38 @@ impl VisitMut for MacroFilter<'_, '_> {
             }
         };
         match expr {
-            syn::Expr::Block(syn::ExprBlock {
-                attrs,
-                ..
-            }) | syn::Expr::Tuple(syn::ExprTuple {
-                attrs,
-                ..
-            }) => {
+            syn::Expr::Block(syn::ExprBlock { attrs, .. })
+            | syn::Expr::Tuple(syn::ExprTuple { attrs, .. }) => {
                 attrs.retain(|attr| {
                     if let syn::Meta::Path(syn::Path {
                         leading_colon: None,
                         segments,
-                    }) = &attr.meta {
+                    }) = &attr.meta
+                    {
                         !matches!(action(segments), Filter::Strip)
                     } else {
                         true
                     }
                 });
-                if attrs.iter().any(|attribute| if let syn::Attribute { meta: syn::Meta::Path(syn::Path {
-                    leading_colon: None,
-                    segments,
-                }), .. } = attribute { matches!{action(segments), Filter::Remove} } else { false }) {
+                if attrs.iter().any(|attribute| {
+                    if let syn::Attribute {
+                        meta:
+                            syn::Meta::Path(syn::Path {
+                                leading_colon: None,
+                                segments,
+                            }),
+                        ..
+                    } = attribute
+                    {
+                        matches! {action(segments), Filter::Remove}
+                    } else {
+                        false
+                    }
+                }) {
                     *expr = syn::Expr::Verbatim(default());
-                    return
+                    return;
                 }
-            },
+            }
             _ => (),
         }
         visit_mut::visit_expr_mut(self, expr);

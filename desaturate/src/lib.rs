@@ -174,8 +174,8 @@ impl<Output, T: FnOnce() -> Output> Blocking<Output> for T {
     }
 }
 
-mod internal {
-    pub trait InternalOnlyImpl<Output> {}
+mod private {
+    pub trait Sealed<Output> {}
 }
 
 features! {async fn: create_asyncable!{ T => Blocking<T> + IntoFuture<Output = T> }}
@@ -188,7 +188,7 @@ features! {!async !fn: create_asyncable!{ T => }}
 
 features! {!async !fn:
     impl<O> Desaturated<O> for () {}
-    impl<O> internal::InternalOnlyImpl<O> for () {}
+    impl<O> private::Sealed<O> for () {}
 }
 
 #[doc(hidden)]
@@ -242,7 +242,7 @@ impl<'a, O: 'a, A: 'a, F: 'a + AsyncFnOnce<'a, A, O>> IntoDesaturatedWith<'a, A,
                     (self.fun)(self.args)
                 }
             }
-            impl<'a, Output, Args: 'a, NormalFunc: FnOnce(Args) -> Output, AsyncFunc: AsyncFnOnce<'a, Args, Output>> internal::InternalOnlyImpl<Output> for Holder<'a, Output, Args, NormalFunc, AsyncFunc> {}
+            impl<'a, Output, Args: 'a, NormalFunc: FnOnce(Args) -> Output, AsyncFunc: AsyncFnOnce<'a, Args, Output>> private::Sealed<Output> for Holder<'a, Output, Args, NormalFunc, AsyncFunc> {}
             Holder {
                 args,
                 fun,
@@ -255,7 +255,7 @@ impl<'a, O: 'a, A: 'a, F: 'a + AsyncFnOnce<'a, A, O>> IntoDesaturatedWith<'a, A,
         #[inline(always)]
         fn desaturate_with(self, args: A, _: impl FnOnce(A) -> O) -> impl Desaturated<O> + 'a {
             struct Holder<Out, T: Future<Output = Out>>(T);
-            impl<Out, T: Future<Output = Out>> internal::InternalOnlyImpl<Out> for Holder<Out, T> {}
+            impl<Out, T: Future<Output = Out>> private::Sealed<Out> for Holder<Out, T> {}
             impl<Out, T: Future<Output = Out>> IntoFuture for Holder<Out, T> {
                 type Output = Out;
 
@@ -277,7 +277,7 @@ impl<'a, O: 'a, A: 'a, F: 'a + AsyncFnOnce<'a, A, O>> IntoDesaturatedWith<'a, A,
                 fun: Function,
                 phantom: core::marker::PhantomData<&'a ()>,
             }
-            impl<'a, Output, Args: 'a, Function: FnOnce(Args) -> Output> internal::InternalOnlyImpl<Output> for Holder<'a, Output, Args, Function> {}
+            impl<'a, Output, Args: 'a, Function: FnOnce(Args) -> Output> private::Sealed<Output> for Holder<'a, Output, Args, Function> {}
             impl<'a, Output, Args: 'a, Function: FnOnce(Args) -> Output> Blocking<Output> for Holder<'a, Output, Args, Function> {
                 #[inline(always)]
                 fn call(self) -> Output {

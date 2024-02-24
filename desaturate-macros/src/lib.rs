@@ -10,7 +10,7 @@ use syn::{
 };
 
 #[cfg(all(feature = "dont-directly-import-this-crate", not(doc), not(test)))]
-compile_error!{"Directly importing the `desaturate-macros` crate may make generated functions unsound, as they require that the feature flags of this crate match with the `desaturate` crate."}
+compile_error! {"Directly importing the `desaturate-macros` crate may make generated functions unsound, as they require that the feature flags of this crate match with the `desaturate` crate."}
 
 pub(crate) fn default<T: Default>() -> T {
     T::default()

@@ -37,9 +37,9 @@ macro_rules! create_asyncable {
         /// [`IntoFuture`]: core::future::IntoFuture
         /// [`into_future()`]: core::future::IntoFuture::into_future
         /// [`call()`]: Blocking::call
-        pub trait Desaturated<$T>: $($($traits)+ +)? internal::InternalOnlyImpl<$T> {}
+        pub trait Desaturated<$T>: $($($traits)+ +)? private::Sealed<$T> {}
         $(
-            impl<$T, U: $($traits)+ + internal::InternalOnlyImpl<$T>> Desaturated<$T> for U {}
+            impl<$T, U: $($traits)+ + private::Sealed<$T>> Desaturated<$T> for U {}
         )?
     };
 }

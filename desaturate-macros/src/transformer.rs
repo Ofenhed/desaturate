@@ -9,7 +9,7 @@ use syn::{
 
 use crate::{
     default,
-    visitors::{AsyncStripper, DefaultLifetime, SelfReplacer, MacroFilter},
+    visitors::{AsyncStripper, DefaultLifetime, MacroFilter, SelfReplacer},
     AsyncFunction, Asyncable,
 };
 
@@ -112,16 +112,14 @@ impl FunctionState<'_> {
             let output_type = self.old_return_type();
             let (default_paren, default_elems);
             let (arrow, output_type) = if let ReturnType::Type(arrow, output) = output_type {
-                if let Err(e) = match &**output {
+                match &**output {
                     Type::BareFn(x) => Err(syn::Error::new(x.span(), "Unsupported return type")),
                     Type::ImplTrait(x) => Err(syn::Error::new(x.span(), "Unsupported return type")),
                     Type::Infer(x) => Err(syn::Error::new(x.span(), "Unsupported return type")),
                     Type::Macro(x) => Err(syn::Error::new(x.span(), "Unsupported return type")),
                     Type::Verbatim(x) => Err(syn::Error::new(x.span(), "Unsupported return type")),
                     _ => Ok(()),
-                } {
-                    return Err(e);
-                }
+                }?;
                 (arrow, &**output)
             } else {
                 default_paren = <Token![->]>::default();
@@ -219,16 +217,13 @@ impl FunctionState<'_> {
     pub fn self_new_name(&self) -> Option<&Ident> {
         self.self_new_name
             .get_or_init(|| {
-                self.inputs
-                    .first()
-                    .map(|first| {
-                        if let FnArg::Receiver(syn::Receiver { self_token, .. }) = first {
-                            Some(self.new_ident(Ident::new("selfish", self_token.span())))
-                        } else {
-                            None
-                        }
-                    })
-                    .flatten()
+                self.inputs.first().and_then(|first| {
+                    if let FnArg::Receiver(syn::Receiver { self_token, .. }) = first {
+                        Some(self.new_ident(Ident::new("selfish", self_token.span())))
+                    } else {
+                        None
+                    }
+                })
             })
             .as_ref()
     }
@@ -270,8 +265,8 @@ impl FunctionState<'_> {
     pub fn simple_input_variables(&self) -> &Punctuated<syn::FnArg, Token![,]> {
         self.simple_input_variables.get_or_init(|| {
             let mut variables = self.function.inputs.clone();
-            variables.iter_mut().for_each(|variable| match variable {
-                FnArg::Typed(typed) => {
+            variables.iter_mut().for_each(|variable| {
+                if let FnArg::Typed(typed) = variable {
                     let syn::PatType {
                         attrs,
                         pat,
@@ -287,11 +282,10 @@ impl FunctionState<'_> {
                             mutability: default(),
                             subpat: default(),
                         })),
-                        colon_token: colon_token.clone(),
+                        colon_token: *colon_token,
                         ty: ty.clone(),
                     };
                 }
-                _ => (),
             });
             if let Some(desaturated_lifetime) = self.desaturated_lifetime() {
                 let mut replacer = DefaultLifetime(desaturated_lifetime);
@@ -389,7 +383,7 @@ impl FunctionState<'_> {
                             .as_ref()
                             .or_else(|| self.desaturated_lifetime())
                             .cloned(),
-                        mutability: mutability.clone(),
+                        mutability: *mutability,
                         elem: Box::new(Type::Path(syn::TypePath {
                             qself: default(),
                             path: syn::Path {
@@ -431,7 +425,11 @@ impl FunctionState<'_> {
     pub fn async_body(&self) -> &Block {
         self.async_body.get_or_init(|| {
             let mut body = self.body.clone();
-            MacroFilter { remove: &self.options.only_blocking_attr.iter().collect::<Vec<_>>(), strip: &self.options.only_async_attr.iter().collect::<Vec<_>>() }.visit_block_mut(&mut body);
+            MacroFilter {
+                remove: &self.options.only_blocking_attr.iter().collect::<Vec<_>>(),
+                strip: &self.options.only_async_attr.iter().collect::<Vec<_>>(),
+            }
+            .visit_block_mut(&mut body);
             body
         })
     }
@@ -468,7 +466,11 @@ impl FunctionState<'_> {
     pub fn blocking_function_body(&self) -> &Block {
         self.blocking_function_body.get_or_init(|| {
             let mut body = self.body.clone();
-            MacroFilter { remove: &self.options.only_async_attr.iter().collect::<Vec<_>>(), strip: &self.options.only_blocking_attr.iter().collect::<Vec<_>>() }.visit_block_mut(&mut body);
+            MacroFilter {
+                remove: &self.options.only_async_attr.iter().collect::<Vec<_>>(),
+                strip: &self.options.only_blocking_attr.iter().collect::<Vec<_>>(),
+            }
+            .visit_block_mut(&mut body);
             AsyncStripper.visit_block_mut(&mut body);
             body
         })
