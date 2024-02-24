@@ -8,12 +8,18 @@ authors.workspace = true
 repository.workspace = true
 keywords = ["experimental"]
 
+[package.metadata.docs.rs]
+no-default-features = true
+rustdoc-args = ["--cfg", "doc"]
+
 [lib]
 proc-macro = true
 
 [features]
+default = ["dont-directly-import-this-crate"]
 generate-async = []
 generate-blocking = []
+dont-directly-import-this-crate = []
 
 [dependencies]
 proc-macro2 = "1.0.78"

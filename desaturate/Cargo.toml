@@ -26,7 +26,7 @@ generate-blocking = ["blocking"]
 std = []
 
 [dependencies]
-desaturate-macros = { version = "0.0.2", path = "../desaturate-macros", optional = true }
+desaturate-macros = { version = "0.0.2", path = "../desaturate-macros", default-features = false, optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

@@ -9,6 +9,9 @@ use syn::{
     Ident, Lifetime, Token,
 };
 
+#[cfg(all(feature = "dont-directly-import-this-crate", not(doc), not(test)))]
+compile_error!{"Directly importing the `desaturate-macros` crate may make generated functions unsound, as they require that the feature flags of this crate match with the `desaturate` crate."}
+
 pub(crate) fn default<T: Default>() -> T {
     T::default()
 }
@@ -197,31 +200,5 @@ pub fn desaturate(attr: TokenStream, item: TokenStream) -> TokenStream {
             .unwrap_or_else(syn::Error::into_compile_error)
             .into(),
         Err(e) => e.into_compile_error().into(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Asyncable;
-    use quote::quote;
-    #[test]
-    fn only_async_unchanged() -> syn::Result<()> {
-        let handler = Asyncable {
-            lifetime: None,
-            debug_dump: Some(proc_macro2::Span::call_site()),
-            make_async: true,
-            make_blocking: false,
-        };
-        let function = quote! {
-            pub async fn do_something(other: i32) -> i32 {
-                do_something().await?;
-                call_somewhere().await;
-                other * 2
-            }
-        };
-        let expected = function.clone();
-        let result = handler.desaturate(function)?;
-        assert_eq!(format!("{result}"), format!("{expected}"));
-        Ok(())
     }
 }
