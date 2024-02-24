@@ -1,6 +1,6 @@
 [package]
 name = "desaturate"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2021"
 categories = ["asynchronous", "no-std::no-alloc", "rust-patterns"]
 keywords = ["experimental"]
@@ -27,7 +27,7 @@ generate-blocking = ["blocking"]
 std = []
 
 [dependencies]
-desaturate-macros = { version = "0.0.2", path = "../desaturate-macros", default-features = false, optional = true }
+desaturate-macros = { version = "0.0.3", path = "../desaturate-macros", default-features = false, optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
