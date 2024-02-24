@@ -10,7 +10,7 @@ async fn recursive(arg: i32) -> i32 {
     if arg <= 1 {
         1
     } else {
-        arg * recurse(arg - 1).await
+        arg * recursive(arg - 1).await
     }
 }
 ```

@@ -85,6 +85,7 @@ impl FunctionState<'_> {
         self.options.lifetime.as_ref()
     }
     pub fn desaturated_lifetime(&self) -> Option<&Lifetime> {
+        // TODO: Rewrite this to use a Visitor instead
         self.manual_lifetime().or_else(|| {
             self.desaturated_lifetime
                 .get_or_init(|| {
