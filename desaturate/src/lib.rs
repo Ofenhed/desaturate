@@ -1,4 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
     not(all(
         feature = "std",
@@ -79,7 +80,7 @@ struct MyType<'a> {
 }
 
 impl<'a> MyType<'a> {
-    #[desaturate(debug_dump, lifetime = "'a")]
+    #[desaturate(lifetime = "'a")]
     async fn get_inner_mut(&mut self) -> &mut i32 {
         &mut self.inner
     }
@@ -93,6 +94,7 @@ impl<'a> MyType<'a> {
 
 use core::future::{Future, IntoFuture};
 
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 #[cfg(feature = "std")]
 pub mod boxed;
 
@@ -100,6 +102,7 @@ pub mod boxed;
 mod macros;
 use macros::*;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "macros")))]
 #[cfg(feature = "macros")]
 /// This macro will try to automatic add the trait [`Desaturated`] to a function signature.
 #[cfg_attr(
@@ -133,7 +136,7 @@ async fn main() {
 /// ```
 /// # use desaturate::desaturate;
 /// // Dump the result generated code into stderr:
-/// #[desaturate]
+/// #[desaturate(debug_dump)]
 /// # async fn do_nothing() {}
 /// # struct Test<'a>(&'a i32);
 /// # impl<'a> Test<'a> {
@@ -173,6 +176,7 @@ features! {!async !fn:
     impl<O> internal::InternalOnlyImpl<O> for () {}
 }
 
+#[doc(hidden)]
 pub trait AsyncFnOnce<'a, Args: 'a, Out> {
     type Output: Future<Output = Out> + 'a;
     fn call(self, args: Args) -> Self::Output;
