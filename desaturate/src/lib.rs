@@ -134,7 +134,7 @@ async fn main() {
 ///
 /// Available attributes:
 /// ```
-/// # use desaturate::desaturate;
+/// # use desaturate::{desaturate, Blocking};
 /// // Dump the result generated code into stderr:
 /// #[desaturate(debug_dump)]
 /// # async fn do_nothing() {}
@@ -144,6 +144,21 @@ async fn main() {
 /// // Use the lifetime 'a instead of a generated one for the lifetime of impl Desaturated<_>.
 /// #[desaturate(lifetime = "'a")]
 /// # async fn inner(&self) -> &i32 { self.0 }
+/// # }
+///
+/// // Have conditional compilation based on current function color
+/// #[desaturate(only_blocking_attr = "for_blocking", only_async_attr = "for_async")]
+/// async fn target_specific(arg: i32) -> i32 {
+///     let something;
+///     #[for_blocking] { something = arg + 1 }
+///     #[for_async] { something = arg - 1 }
+///     something
+/// }
+/// #
+/// # #[tokio::main]
+/// # async fn main() {
+/// # assert_eq!(6, target_specific(5).call());
+/// # assert_eq!(4, target_specific(5).await);
 /// # }
 /// ```
 /// Multiple attributes can be added with comma separation.

@@ -25,6 +25,8 @@ use crate::{input_function::*, transformer::*};
 struct Asyncable {
     debug_dump: Option<Span>,
     lifetime: Option<Lifetime>,
+    only_async_attr: Option<Ident>,
+    only_blocking_attr: Option<Ident>,
     make_blocking: bool,
     make_async: bool,
 }
@@ -70,12 +72,26 @@ impl Parse for Asyncable {
                 }
                 Setting {
                     name,
+                    value: Some((_eq, syn::Lit::Str(ident))),
+                } if name == "only_async_attr" => match ident.parse() {
+                    Ok(ident) => result.only_async_attr = ident,
+                    Err(e) => errors.push(e),
+                },
+                Setting {
+                    name,
+                    value: Some((_eq, syn::Lit::Str(ident))),
+                } if name == "only_blocking_attr" => match ident.parse() {
+                    Ok(ident) => result.only_blocking_attr = ident,
+                    Err(e) => errors.push(e),
+                },
+                Setting {
+                    name,
                     value: Some((_eq, syn::Lit::Str(lifetime))),
                 } if name == "lifetime" => match lifetime.parse() {
                     Ok(lifetime) => result.lifetime = lifetime,
                     Err(e) => errors.push(e),
                 },
-                invalid => errors.push(syn::Error::new(invalid.span(), "Invalid setting")),
+                invalid => errors.push(syn::Error::new(invalid.span(), "Invalid argument")),
             });
         let errors = errors
             .into_iter()

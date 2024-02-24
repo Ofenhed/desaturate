@@ -9,7 +9,7 @@ use syn::{
 
 use crate::{
     default,
-    visitors::{AsyncStripper, DefaultLifetime, SelfReplacer},
+    visitors::{AsyncStripper, DefaultLifetime, SelfReplacer, MacroFilter},
     AsyncFunction, Asyncable,
 };
 
@@ -23,7 +23,8 @@ pub(crate) struct FunctionState<'a> {
     blocking_function_body: OnceCell<Block>,
     blocking_let_statement: OnceCell<syn::ExprLet>,
     blocking_name: OnceCell<Ident>,
-    body_without_self: OnceCell<Block>,
+    async_body_without_self: OnceCell<Block>,
+    async_body: OnceCell<Block>,
     desaturated_lifetime: OnceCell<Option<Lifetime>>,
     function_arguments_without_self: OnceCell<Punctuated<Pat, Token![,]>>,
     input_variables: OnceCell<Punctuated<Pat, Token![,]>>,
@@ -47,7 +48,8 @@ impl<'a> FunctionState<'a> {
             blocking_function_body: default(),
             blocking_let_statement: default(),
             blocking_name: default(),
-            body_without_self: default(),
+            async_body_without_self: default(),
+            async_body: default(),
             desaturated_lifetime: default(),
             function_arguments_without_self: default(),
             input_variables: default(),
@@ -426,25 +428,29 @@ impl FunctionState<'_> {
                 .collect()
         })
     }
-    pub fn body_without_self(&self) -> &Block {
-        if let Some(new_self_name) = self.self_new_name() {
-            self.body_without_self.get_or_init(|| {
-                let mut body = self.body.clone();
-                let new_self_name = format!("{new_self_name}");
-                let mut visitor = SelfReplacer(&new_self_name);
-                visitor.visit_block_mut(&mut body);
+    pub fn async_body(&self) -> &Block {
+        self.async_body.get_or_init(|| {
+            let mut body = self.body.clone();
+            MacroFilter { remove: &self.options.only_blocking_attr.iter().collect::<Vec<_>>(), strip: &self.options.only_async_attr.iter().collect::<Vec<_>>() }.visit_block_mut(&mut body);
+            body
+        })
+    }
+    pub fn async_body_without_self(&self) -> &Block {
+        if let Some(self_new_name) = self.self_new_name() {
+            self.async_body_without_self.get_or_init(|| {
+                let mut body = self.async_body().clone();
+                SelfReplacer(self_new_name).visit_block_mut(&mut body);
                 body
             })
         } else {
-            &self.body
+            self.async_body()
         }
     }
     pub fn function_arguments_without_self(&self) -> &Punctuated<Pat, Token![,]> {
         if let Some(new_self_name) = self.self_new_name() {
             self.function_arguments_without_self.get_or_init(|| {
                 let mut inputs = self.input_variables().clone();
-                let new_self_name = format!("{new_self_name}");
-                let mut visitor = SelfReplacer(&new_self_name);
+                let mut visitor = SelfReplacer(new_self_name);
                 inputs.iter_mut().for_each(|pat| visitor.visit_pat_mut(pat));
                 inputs
             })
@@ -461,19 +467,22 @@ impl FunctionState<'_> {
     }
     pub fn blocking_function_body(&self) -> &Block {
         self.blocking_function_body.get_or_init(|| {
-            let mut visitor = AsyncStripper;
             let mut body = self.body.clone();
-            visitor.visit_block_mut(&mut body);
+            MacroFilter { remove: &self.options.only_async_attr.iter().collect::<Vec<_>>(), strip: &self.options.only_blocking_attr.iter().collect::<Vec<_>>() }.visit_block_mut(&mut body);
+            AsyncStripper.visit_block_mut(&mut body);
             body
         })
     }
     pub fn blocking_body_without_self(&self) -> &Block {
-        self.blocking_body_without_self.get_or_init(|| {
-            let mut visitor = AsyncStripper;
-            let mut body = self.body_without_self().clone();
-            visitor.visit_block_mut(&mut body);
-            body
-        })
+        if let Some(new_self_name) = self.self_new_name() {
+            self.blocking_body_without_self.get_or_init(|| {
+                let mut body = self.blocking_function_body().clone();
+                SelfReplacer(new_self_name).visit_block_mut(&mut body);
+                body
+            })
+        } else {
+            self.blocking_function_body()
+        }
     }
     pub fn async_name(&self) -> &Ident {
         self.async_name
@@ -510,7 +519,7 @@ impl FunctionState<'_> {
                     attrs: default(),
                     async_token: default(),
                     capture: Some(default()),
-                    block: self.body_without_self().clone(),
+                    block: self.async_body_without_self().clone(),
                 })),
             })),
         })
